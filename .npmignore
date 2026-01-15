@@ -1,0 +1,27 @@
+# Test files
+tests/
+*.test.ts
+*.spec.ts
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Source TypeScript
+src/
+
+# Config files
+tsconfig*.json
+jest.config.js
+.eslintrc.js
+.prettierrc
+.gitignore
+.npmignore
+
+# Editor
+.vscode/
+.idea/
+
+# Build artifacts
+*.tsbuildinfo
