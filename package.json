@@ -2,15 +2,41 @@
     "name": "whatsapp-cloud-bot",
     "version": "1.0.0",
     "description": "A TypeScript/JavaScript client library for building WhatsApp bots using the WhatsApp Business Cloud API",
-    "main": "dist/cjs/index.js",
-    "module": "dist/esm/index.js",
-    "types": "dist/types/index.d.ts",
+    "keywords": [
+        "whatsapp",
+        "whatsapp-bot",
+        "whatsapp-api",
+        "whatsapp-business",
+        "whatsapp-cloud-api",
+        "bot",
+        "chatbot",
+        "messaging",
+        "typescript",
+        "async"
+    ],
+    "homepage": "https://github.com/radi-dev/whatsapp-cloud-bot-ts#readme",
+    "bugs": {
+        "url": "https://github.com/radi-dev/whatsapp-cloud-bot-ts/issues"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/radi-dev/whatsapp-cloud-bot-ts.git"
+    },
+    "license": "MIT",
+    "author": "Radi <evaradi18@gmail.com>",
+    "type": "module",
     "exports": {
         ".": {
             "import": "./dist/esm/index.js",
             "require": "./dist/cjs/index.js",
             "types": "./dist/types/index.d.ts"
         }
+    },
+    "main": "dist/cjs/index.js",
+    "types": "dist/types/index.d.ts",
+    "directories": {
+        "doc": "docs",
+        "test": "tests"
     },
     "files": [
         "dist",
@@ -31,34 +57,6 @@
         "format": "prettier --write 'src/**/*.ts'",
         "prepublishOnly": "npm run build && npm test"
     },
-    "keywords": [
-        "whatsapp",
-        "whatsapp-bot",
-        "whatsapp-api",
-        "whatsapp-business",
-        "whatsapp-cloud-api",
-        "bot",
-        "chatbot",
-        "messaging",
-        "typescript",
-        "async"
-    ],
-    "author": {
-        "name": "Radi",
-        "email": "evaradi18@gmail.com"
-    },
-    "license": "MIT",
-    "repository": {
-        "type": "git",
-        "url": "https://github.com/Radi-dev/whatsapp-bot-client"
-    },
-    "bugs": {
-        "url": "https://github.com/Radi-dev/whatsapp-bot-client/issues"
-    },
-    "homepage": "https://github.com/Radi-dev/whatsapp-bot-client#readme",
-    "engines": {
-        "node": ">=14.0.0"
-    },
     "dependencies": {
         "axios": "^1.6.0",
         "form-data": "^4.0.0"
@@ -75,5 +73,9 @@
         "prettier": "^3.0.0",
         "ts-jest": "^29.1.0",
         "typescript": "^5.2.0"
-    }
+    },
+    "engines": {
+        "node": ">=14.0.0"
+    },
+    "module": "dist/esm/index.js"
 }
