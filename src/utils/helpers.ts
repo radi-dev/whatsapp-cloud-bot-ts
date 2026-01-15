@@ -66,35 +66,26 @@ export function isLink(str: string): boolean {
 }
 
 /**
- * Validate media MIME type
- * @param mimeType - MIME type to validate
- * @param allowedTypes - Array of allowed MIME type prefixes
- * @returns true if valid
+ * File extension to MIME type mapping for WhatsApp supported media types
  */
-export function isValidMimeType(
-  mimeType: string,
-  allowedTypes: string[]
-): boolean {
-  return allowedTypes.some((type) => mimeType.startsWith(type));
-}
-
-/**
- * File extension to MIME type mapping
- */
-export const KNOWN_MIME_TYPES: Record<string, string> = {
-  '.txt': 'text/plain',
+const KNOWN_MIME_TYPES: Record<string, string> = {
+  // Images
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.png': 'image/png',
   '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  // Video
   '.mp4': 'video/mp4',
-  '.mp3': 'audio/mp3',
-  '.mpeg': 'audio/mpeg',
-  '.wav': 'audio/wav',
+  '.3gp': 'video/3gpp',
+  // Audio
   '.aac': 'audio/aac',
-  '.opus': 'audio/ogg',
+  '.mp3': 'audio/mpeg',
+  '.mpeg': 'audio/mpeg',
+  '.amr': 'audio/amr',
   '.ogg': 'audio/ogg',
-  '.webm': 'audio/webm',
+  '.opus': 'audio/ogg',
+  // Documents
   '.pdf': 'application/pdf',
   '.doc': 'application/msword',
   '.docx':
@@ -104,17 +95,8 @@ export const KNOWN_MIME_TYPES: Record<string, string> = {
     'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   '.xls': 'application/vnd.ms-excel',
   '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.txt': 'text/plain',
 };
-
-/**
- * Get MIME type from file extension
- * @param extension - File extension (with or without dot)
- * @returns MIME type or 'application/octet-stream' as fallback
- */
-export function getMimeTypeFromExtension(extension: string): string {
-  const ext = extension.startsWith('.') ? extension : `.${extension}`;
-  return KNOWN_MIME_TYPES[ext.toLowerCase()] || 'application/octet-stream';
-}
 
 /**
  * Get file extension from MIME type
@@ -122,6 +104,19 @@ export function getMimeTypeFromExtension(extension: string): string {
  * @returns File extension or '.bin' as fallback
  */
 export function getExtensionFromMimeType(mimeType: string): string {
+  // Preferred extensions for common MIME types
+  const preferredExtensions: Record<string, string> = {
+    'image/jpeg': '.jpg',
+    'audio/mpeg': '.mp3',
+    'audio/ogg': '.ogg',
+  };
+
+  // Check preferred extensions first
+  if (preferredExtensions[mimeType]) {
+    return preferredExtensions[mimeType];
+  }
+
+  // Fallback to searching the mapping
   const entry = Object.entries(KNOWN_MIME_TYPES).find(
     ([, mime]) => mime === mimeType
   );
