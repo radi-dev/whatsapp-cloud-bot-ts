@@ -43,10 +43,35 @@ pnpm add whatsapp-cloud-bot
 
 ## Quick Start
 
+You can initialize the client in two ways.
+
+### Method 1: Initialize with Handlers (Recommended)
+
+Pass your handlers directly to the constructor for a cleaner setup.
+
+```typescript
+import { WhatsApp, MessageHandler } from 'whatsapp-cloud-bot';
+
+const messageHandler = new MessageHandler(async (update) => {
+  await update.replyMessage('Hello!');
+});
+
+const client = new WhatsApp({
+  numberId: 'YOUR_PHONE_NUMBER_ID',
+  token: 'YOUR_ACCESS_TOKEN',
+  handlers: {
+    messageHandler,
+  }
+});
+```
+
+### Method 2: Register Handlers Separately
+
+Initialize the client first, then register handlers.
+
 ```typescript
 import { WhatsApp } from 'whatsapp-cloud-bot';
 
-// Initialize the client
 const client = new WhatsApp({
   numberId: 'YOUR_PHONE_NUMBER_ID',
   token: 'YOUR_ACCESS_TOKEN',
@@ -57,7 +82,11 @@ client.onMessage(async (update, context) => {
   console.log(`Message from ${update.userDisplayName}: ${update.messageText}`);
   await update.replyMessage('Hello! Thanks for your message.');
 });
+```
 
+### Webhook Integration
+
+```typescript
 // Process incoming webhook (in your Express/HTTP server)
 app.post('/webhook', async (req, res) => {
   await client.processUpdate(req.body);

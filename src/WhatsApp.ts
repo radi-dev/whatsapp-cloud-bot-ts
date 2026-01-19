@@ -48,6 +48,7 @@ export interface WhatsAppConfig {
   token: string;
   markAsRead?: boolean;
   version?: number;
+  handlers?: Record<string, UpdateHandler>;
 }
 
 /**
@@ -92,6 +93,12 @@ export class WhatsApp {
     this.mediaUrl = `${this.baseUrl}/${this.id}/media`;
 
     this.dispatcher = new Dispatcher(this, config.markAsRead !== false);
+
+    if (config.handlers) {
+      for (const handler of Object.values(config.handlers)) {
+        this.dispatcher.registerHandler(handler);
+      }
+    }
   }
 
   /**

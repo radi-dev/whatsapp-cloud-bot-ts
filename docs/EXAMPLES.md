@@ -15,6 +15,17 @@ const client = new WhatsApp({
 client.onMessage(async (update) => {
   await update.replyMessage(`You said: ${update.messageText}`);
 });
+
+// Or using constructor registration:
+// const handler = new MessageHandler(async (update) => {
+//   await update.replyMessage(`You said: ${update.messageText}`);
+// });
+//
+// const client = new WhatsApp({
+//   numberId: '...',
+//   token: '...',
+//   handlers: { handler }
+// });
 ```
 
 ## Survey Bot with Context

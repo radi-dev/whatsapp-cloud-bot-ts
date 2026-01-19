@@ -1,6 +1,6 @@
 {
     "name": "whatsapp-cloud-bot",
-    "version": "1.0.0",
+    "version": "1.2.0",
     "description": "A TypeScript/JavaScript client library for building WhatsApp bots using the WhatsApp Business Cloud API",
     "keywords": [
         "whatsapp",
