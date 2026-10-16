@@ -1,7 +1,10 @@
 import { jest } from '@jest/globals';
 import { WhatsApp } from '../src/WhatsApp.js';
 import type { Update } from '../src/Update.js';
-import type { WebhookPayload, InteractiveReplyType } from '../src/types/index.js';
+import type {
+  WebhookPayload,
+  InteractiveReplyType,
+} from '../src/types/index.js';
 
 const PHONE_NUMBER_ID = '106540352242922';
 

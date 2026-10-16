@@ -18,6 +18,8 @@ import type {
 } from './types/index.js';
 import type { InlineButton, ListItem, ListSection } from './Markup.js';
 import type { InteractiveSendOptions } from './Message.js';
+import type { UserContext } from './context/UserContext.js';
+import { ContextStoreRequiredError } from './context/ContextStore.js';
 
 /** Text-only reply options. */
 export interface ReplyTextOptions {
@@ -54,6 +56,7 @@ export class Update {
   public locName?: string;
   public locLatitude?: number;
   public locLongitude?: number;
+  private attachedContext?: UserContext;
 
   constructor(bot: WhatsAppClient, value: WebhookValue) {
     this.bot = bot;
@@ -63,6 +66,35 @@ export class Update {
     this.userDisplayName = this.user.profile?.name || '';
     this.userPhoneNumber = this.user.wa_id || '';
     this.messageId = this.message.id || '';
+  }
+
+  /**
+   * The sender's persistent {@link UserContext} for this update. Attached by
+   * the dispatcher whenever a `contextStore` is configured (for every handler,
+   * context-aware or not), so helpers that only receive the `update` can still
+   * read state or call `setNextStep`. Changes are persisted together with the
+   * handler's own context changes when the handler resolves.
+   *
+   * @throws {ContextStoreRequiredError} when no context is attached (no store
+   *   configured, or an `Update` constructed outside the dispatcher)
+   */
+  get context(): UserContext {
+    if (!this.attachedContext) {
+      throw new ContextStoreRequiredError(
+        'update.context was accessed but no context is attached to this update.'
+      );
+    }
+    return this.attachedContext;
+  }
+
+  /** Whether a {@link UserContext} is attached (see {@link context}). */
+  get hasContext(): boolean {
+    return this.attachedContext !== undefined;
+  }
+
+  /** @internal Used by the dispatcher to attach the loaded context. */
+  attachContext(context: UserContext | undefined): void {
+    this.attachedContext = context;
   }
 
   // ---------------------------------------------------------------------------
@@ -109,10 +141,15 @@ export class Update {
     buttons: (string | InlineButton)[],
     options: InteractiveSendOptions = {}
   ): Promise<AxiosResponse> {
-    return await this.bot.sendButtonMessage(this.userPhoneNumber, text, buttons, {
-      ...options,
-      msgId: options.msgId || this.messageId,
-    });
+    return await this.bot.sendButtonMessage(
+      this.userPhoneNumber,
+      text,
+      buttons,
+      {
+        ...options,
+        msgId: options.msgId || this.messageId,
+      }
+    );
   }
 
   /**

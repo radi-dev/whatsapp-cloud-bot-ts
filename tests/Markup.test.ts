@@ -112,10 +112,7 @@ describe('ListSection', () => {
   });
 
   it('should create a section with ListItem objects', () => {
-    const items = [
-      new ListItem('Red', 'red'),
-      new ListItem('Blue', 'blue'),
-    ];
+    const items = [new ListItem('Red', 'red'), new ListItem('Blue', 'blue')];
     const section = new ListSection('Colors', items);
     expect(section.section.rows).toHaveLength(2);
   });
@@ -153,8 +150,9 @@ describe('InlineList', () => {
   });
 
   it('should throw error for more than 10 total items', () => {
-    const items = Array.from({ length: 11 }, (_, i) =>
-      new ListItem(`Item ${i + 1}`)
+    const items = Array.from(
+      { length: 11 },
+      (_, i) => new ListItem(`Item ${i + 1}`)
     );
     expect(() => {
       new InlineList('Select', items);

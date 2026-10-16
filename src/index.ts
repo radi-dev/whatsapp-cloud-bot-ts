@@ -1,6 +1,6 @@
 /**
  * WhatsApp Bot Client Library
- * A TypeScript/JavaScript library for building WhatsApp bots using WhatsApp Business Cloud API
+ * A TypeScript (ESM-only) library for building WhatsApp bots using the WhatsApp Business Cloud API
  *
  * @packageDocumentation
  */
@@ -12,14 +12,54 @@ export type { WhatsAppConfig } from './WhatsApp.js';
 // Core Classes
 export { Update } from './Update.js';
 export { StatusUpdate } from './StatusUpdate.js';
-export { Dispatcher } from './Dispatcher.js';
-// NOTE: the in-memory UserContext implementation has been removed. The
-// `UserContext` *type* is still exported (via the types barrel below) so the
-// deprecated handler `context?: UserContext` parameter keeps compiling.
+export {
+  Dispatcher,
+  DEFAULT_CONTEXT_CONFLICT_RETRIES,
+  UnknownStepError,
+} from './Dispatcher.js';
+export type { DispatcherContextOptions } from './Dispatcher.js';
+
+// Conversation context (persistent, pluggable storage)
+export {
+  UserContext,
+  NEXT_STEP_KEY,
+  RECENT_MESSAGES_KEY,
+  RECENT_MESSAGES_LIMIT,
+  DEFAULT_FALLBACK_REGEX,
+  ContextStoreError,
+  ContextStoreRequiredError,
+  ContextConflictError,
+  DEFAULT_CONTEXT_NAMESPACE,
+  MemoryContextStore,
+  RedisContextStore,
+  SqlContextStore,
+  PostgresContextStore,
+  MySqlContextStore,
+  SqliteContextStore,
+} from './context/index.js';
+export type {
+  ContextStore,
+  ContextStoreOptions,
+  ContextRecord,
+  WidenLiteral,
+  UserContextHooks,
+  RedisLikeClient,
+  RedisContextStoreOptions,
+  RedisEvalFunction,
+  SqlDialect,
+  SqlContextStoreOptions,
+  SqlQueryResult,
+  PostgresLikeClient,
+  MySqlLikeClient,
+  SqliteLikeDatabase,
+  SqliteSyncDatabase,
+  SqliteAsyncDatabase,
+} from './context/index.js';
 
 // Handlers
 export {
   UpdateHandler,
+  handlerUsesContext,
   TextHandler,
   MessageHandler,
   ButtonHandler,
@@ -36,7 +76,6 @@ export {
   UnknownHandler,
   UnsupportedHandler,
 } from './Handlers.js';
-
 
 // Markup Components
 export {

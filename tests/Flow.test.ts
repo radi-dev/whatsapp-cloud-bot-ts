@@ -11,7 +11,9 @@ describe('Interactive & Flow messages', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    postSpy = jest.spyOn(axios, 'post').mockResolvedValue({ data: {} } as never);
+    postSpy = jest
+      .spyOn(axios, 'post')
+      .mockResolvedValue({ data: {} } as never);
     client = new WhatsApp({ numberId: '123', token: 'test-token' });
   });
 
@@ -76,7 +78,9 @@ describe('Interactive & Flow messages', () => {
     const params = lastPayload().interactive.action.parameters;
     expect(params.flow_name).toBe('signup');
     expect(params.flow_action_payload.screen).toBe('FIRST_ENTRY_SCREEN');
-    expect(params.flow_action_payload.data).toBe(JSON.stringify({ plan: 'pro' }));
+    expect(params.flow_action_payload.data).toBe(
+      JSON.stringify({ plan: 'pro' })
+    );
   });
 
   it('omits flow_action_payload for data_exchange', async () => {

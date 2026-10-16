@@ -19,6 +19,8 @@ import type {
   QuickReplyAction,
   CtaUrlAction,
   FlowParameters,
+  NextStepOptions,
+  NextStepState,
 } from './types/index.js';
 import { Dispatcher } from './Dispatcher.js';
 import type { Update } from './Update.js';
@@ -57,8 +59,8 @@ import {
   sendTypingIndicator,
 } from './Message.js';
 import { formatPhoneNumber } from './utils/helpers.js';
-
-
+import type { ContextStore } from './context/ContextStore.js';
+import type { UserContext } from './context/UserContext.js';
 
 /**
  * WhatsApp Client Configuration
@@ -70,6 +72,41 @@ export interface WhatsAppConfig {
   showTyping?: boolean;
   version?: number;
   handlers?: Record<string, UpdateHandler>;
+  /**
+   * Named step handlers for multi-turn flows, registered at startup (see
+   * {@link WhatsApp.registerStep}). Requires `contextStore`.
+   */
+  steps?: Record<string, UpdateHandler>;
+  /**
+   * Persistent storage for per-user conversation context, e.g.
+   * `new RedisContextStore(redis)` or `new PostgresContextStore(pool)`.
+   *
+   * Optional — but **required** as soon as any handler declares a `context`
+   * parameter; registering such a handler without a store throws
+   * {@link ContextStoreRequiredError}.
+   */
+  contextStore?: ContextStore;
+  /**
+   * How many times a context-aware handler is re-run when saving its context
+   * hits an optimistic-lock conflict (another server changed the user's
+   * context while the handler ran). After the retries are exhausted the
+   * {@link ContextConflictError} propagates out of `processUpdate`.
+   *
+   * @default 3
+   */
+  contextConflictRetries?: number;
+  /**
+   * Ignore a message whose id (wamid) was already handled for that user.
+   * WhatsApp redelivers a webhook (with backoff, for a long time) whenever it
+   * does not receive a 200 in time — including when your handler *did* run
+   * and commit but the response was late. With this on, the handled ids are
+   * stored in the user's context record together with the handler's changes,
+   * so a redelivery is skipped instead of being applied twice. Requires
+   * `contextStore`; has no effect without one.
+   *
+   * @default true
+   */
+  dedupeMessages?: boolean;
 }
 
 /**
@@ -83,8 +120,15 @@ export interface WhatsAppConfig {
  * });
  *
  * // Register message handler
- * client.onMessage(async (update, context) => {
- *   await update.replyMessage('Hello!');
+ * client.onTextMessage(async (update) => {
+ *   await update.replyWithText('Hello!');
+ * });
+ *
+ * // Stateful handler — requires `contextStore` in the config
+ * client.onTextMessage(async (update, context) => {
+ *   const visits = context.get('visits', 0) + 1;
+ *   context.set('visits', visits);
+ *   await update.replyWithText(`Visit #${visits}`);
  * });
  *
  * // Process incoming webhook
@@ -98,6 +142,8 @@ export class WhatsApp {
   public baseUrl: string;
   public msgUrl: string;
   public mediaUrl: string;
+  /** The configured context store, if any. */
+  public readonly contextStore?: ContextStore;
   private dispatcher: Dispatcher;
 
   /**
@@ -113,14 +159,25 @@ export class WhatsApp {
     this.msgUrl = `${this.baseUrl}/${this.id}/messages`;
     this.mediaUrl = `${this.baseUrl}/${this.id}/media`;
 
+    this.contextStore = config.contextStore;
     this.dispatcher = new Dispatcher(
       this,
       config.markAsRead !== false,
-      config.showTyping !== false
+      config.showTyping !== false,
+      {
+        store: config.contextStore,
+        conflictRetries: config.contextConflictRetries,
+        dedupeMessages: config.dedupeMessages,
+      }
     );
     if (config.handlers) {
       for (const handler of Object.values(config.handlers)) {
         this.dispatcher.registerHandler(handler);
+      }
+    }
+    if (config.steps) {
+      for (const [name, handler] of Object.entries(config.steps)) {
+        this.dispatcher.registerStep(name, handler);
       }
     }
   }
@@ -194,12 +251,18 @@ export class WhatsApp {
       );
     }
 
-    return sendTextMessageRequest(this.msgUrl, this.token, formattedPhone, text, {
-      msgId: options.msgId,
-      webPagePreview: options.webPagePreview,
-      tagMessage: options.tagMessage,
-      bizOpaqueCallbackData: options.bizOpaqueCallbackData,
-    });
+    return sendTextMessageRequest(
+      this.msgUrl,
+      this.token,
+      formattedPhone,
+      text,
+      {
+        msgId: options.msgId,
+        webPagePreview: options.webPagePreview,
+        tagMessage: options.tagMessage,
+        bizOpaqueCallbackData: options.bizOpaqueCallbackData,
+      }
+    );
   }
 
   /**
@@ -634,27 +697,90 @@ export class WhatsApp {
   }
 
   /**
-   * Set next step handler for user
+   * Register a named **step handler** for multi-turn flows. The name is what
+   * gets persisted in the user's context when you call {@link setNextStep},
+   * so register every step at startup on every instance (or pass them via the
+   * `steps` config option).
+   *
+   * @example
+   * ```typescript
+   * client.registerStep('ask_email', new TextHandler(async (update, context) => {
+   *   context.set('email', update.messageText);
+   *   await update.replyWithText('Thanks!');
+   * }));
+   * client.registerStep('cancel', new TextHandler(async (update) => {
+   *   await update.replyWithText('Cancelled.');
+   * }));
+   *
+   * client.onTextMessage(async (update) => {
+   *   await update.replyWithText('What is your email?');
+   *   await client.setNextStep(update, 'ask_email', { fallback: 'cancel' });
+   * }, { regex: /^register$/i });
+   * ```
+   *
+   * @throws {ContextStoreRequiredError} when no `contextStore` is configured
    */
-  setNextStep(
-    update: Update,
-    handler: UpdateHandler,
-    fallbackFunction?: () => void | Promise<void>,
-    fallbackRegex?: string | RegExp
-  ): void {
-    this.dispatcher.setNextStep(
-      update,
-      handler,
-      fallbackFunction,
-      fallbackRegex
-    );
+  registerStep(name: string, handler: UpdateHandler): void {
+    this.dispatcher.registerStep(name, handler);
   }
 
   /**
-   * Clear next step handler for user
+   * Route the user's next message to a registered step handler. Persisted in
+   * the context store, so it survives restarts and is honoured by whichever
+   * instance receives the next message.
+   *
+   * Inside a handler pass the `update`; the change is committed together
+   * with the handler's context when it resolves. From outside (cron, admin
+   * endpoint) pass the phone number; the change is written immediately.
+   *
+   * @param target - The current `Update`, or a phone number
+   * @param step - A registered step name (or the registered handler instance)
+   * @param options - Optional `fallback` step + `fallbackRegex` gate
+   * @throws {ContextStoreRequiredError} when no `contextStore` is configured
+   * @throws {UnknownStepError} when the step or fallback is not registered
    */
-  clearNextStep(phoneNumber: string): void {
-    this.dispatcher.clearNextStep(phoneNumber);
+  async setNextStep(
+    target: Update | string,
+    step: string | UpdateHandler,
+    options: NextStepOptions = {}
+  ): Promise<void> {
+    return this.dispatcher.setNextStep(target, step, options);
+  }
+
+  /**
+   * Cancel the user's pending next step.
+   */
+  async clearNextStep(target: Update | string): Promise<void> {
+    return this.dispatcher.clearNextStep(target);
+  }
+
+  /**
+   * The user's pending next step, if any.
+   */
+  async getNextStep(
+    target: Update | string
+  ): Promise<NextStepState | undefined> {
+    return this.dispatcher.getNextStep(target);
+  }
+
+  /**
+   * Load a user's persistent conversation context outside of a handler (e.g.
+   * from a status handler, a cron job or an admin endpoint). Changes are only
+   * persisted when you `await context.save()`.
+   *
+   * @throws {ContextStoreRequiredError} when no `contextStore` is configured
+   */
+  async getContext(phoneNumber: string): Promise<UserContext> {
+    return this.dispatcher.getContext(phoneNumber);
+  }
+
+  /**
+   * Delete a user's persistent conversation context.
+   *
+   * @throws {ContextStoreRequiredError} when no `contextStore` is configured
+   */
+  async clearContext(phoneNumber: string): Promise<void> {
+    return this.dispatcher.clearContext(phoneNumber);
   }
 
   /**
