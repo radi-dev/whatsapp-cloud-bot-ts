@@ -27,10 +27,9 @@ export interface EncryptedFlowRequest {
  * open, `data_exchange` on submit, `BACK` on back-navigation, and `ping` for
  * health checks.
  */
-export interface FlowDataExchangeBody<
-  TData = Record<string, unknown>,
-> {
+export interface FlowDataExchangeBody<TData = Record<string, unknown>> {
   version: string;
+  // eslint-disable-next-line @typescript-eslint/ban-types -- `string & {}` keeps literal autocomplete while allowing any string
   action: 'INIT' | 'BACK' | 'data_exchange' | 'ping' | (string & {});
   screen?: string;
   data?: TData;

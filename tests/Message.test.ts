@@ -3,7 +3,11 @@ import {
   sendCarouselButtonMessage,
   sendCarouselUrlMessage,
 } from '../src/Message.js';
-import type { CarouselCard, QuickReplyAction, CtaUrlAction } from '../src/types/index.js';
+import type {
+  CarouselCard,
+  QuickReplyAction,
+  CtaUrlAction,
+} from '../src/types/index.js';
 import axios from 'axios';
 
 describe('Message API - Media Carousel Messages', () => {

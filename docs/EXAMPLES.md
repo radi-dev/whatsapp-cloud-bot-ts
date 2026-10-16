@@ -30,6 +30,25 @@ client.onMessage(async (update) => {
 
 ## Survey Bot with Context
 
+Handlers that declare a second `context` parameter get the user's persistent state. This **requires a `contextStore`** on the client (the constructor throws `ContextStoreRequiredError` otherwise). Pick the backend that matches your deployment — they are all instantiated the same way:
+
+```typescript
+import { WhatsApp, RedisContextStore } from 'whatsapp-cloud-bot';
+import Redis from 'ioredis';
+
+const client = new WhatsApp({
+  numberId: process.env.WA_PHONE_NUMBER_ID!,
+  token: process.env.WA_TOKEN!,
+  // or PostgresContextStore(pgPool) / MySqlContextStore(mysqlPool) / SqliteContextStore(db)
+  contextStore: new RedisContextStore(new Redis(process.env.REDIS_URL!), {
+    namespace: 'survey_bot',
+    ttlSeconds: 24 * 3600, // abandoned surveys expire after a day of inactivity
+  }),
+});
+```
+
+The context is loaded before the handler runs, used synchronously, and saved when the handler resolves:
+
 ```typescript
 client.onMessage(async (update, context) => {
   const step = context.get('step', 0);
@@ -66,7 +85,7 @@ Age: ${age}
 Email: ${email}`
       );
 
-      context.clear();
+      context.clear(); // empty context -> record deleted on save
       break;
   }
 });
@@ -126,6 +145,7 @@ client.onMessage(
   { regex: /^order$/i }
 );
 
+// Context-aware (needs `contextStore`, see "Survey Bot with Context")
 client.onInteractiveMessage(async (update, context) => {
   const orderId = update.messageText;
   context.set('order', orderId);
@@ -176,6 +196,7 @@ client.onMessage(
   { regex: /^location$/i }
 );
 
+// Context-aware (needs `contextStore`, see "Survey Bot with Context")
 client.onLocationMessage(async (update, context) => {
   const { locLatitude, locLongitude, locName, locAddress } = update;
 
@@ -193,48 +214,72 @@ client.onLocationMessage(async (update, context) => {
 });
 ```
 
-## Advanced: Multi-Step Wizard
+## Advanced: Multi-Step Wizard (Next Steps)
+
+Next steps route a user's following message to a specific handler. Because the pending step is persisted in the context store **by name**, step handlers must be registered at startup on every instance — a closure created inside another handler cannot survive a restart or be reached by another server, so `setNextStep` rejects unregistered handlers and fallback *functions*.
 
 ```typescript
-import { MessageHandler, InlineKeyboard } from 'whatsapp-cloud-bot';
+import { WhatsApp, TextHandler, PostgresContextStore } from 'whatsapp-cloud-bot';
+import { Pool } from 'pg';
+
+const client = new WhatsApp({
+  numberId: process.env.WA_PHONE_NUMBER_ID!,
+  token: process.env.WA_TOKEN!,
+  contextStore: new PostgresContextStore(new Pool({ connectionString: process.env.DATABASE_URL })),
+  steps: {
+    // Step 1 -> asks for the email and chains to step 2
+    ask_name: new TextHandler(async (update, context) => {
+      context.set('name', update.messageText);
+      await update.replyMessage('Step 2: What is your email?');
+      await client.setNextStep(update, 'ask_email', { fallback: 'cancel' });
+    }),
+
+    // Step 2 -> completes the flow
+    ask_email: new TextHandler(async (update, context) => {
+      context.set('email', update.messageText);
+      await update.replyMessage(
+        `Registration complete!\nName: ${context.get('name')}\nEmail: ${context.get('email')}`
+      );
+      context.clear();
+    }),
+
+    // Fallback -> runs instead of the pending step when the text matches the
+    // fallback regex (default /^(end|stop|cancel)$/i)
+    cancel: new TextHandler(async (update, context) => {
+      context.clear();
+      await update.replyMessage('Registration cancelled.');
+    }),
+  },
+});
 
 client.onMessage(
-  async (update, context) => {
+  async (update) => {
     await update.replyMessage('Welcome to the registration wizard!');
     await update.replyMessage('Step 1: What is your name?');
-
-    client.setNextStep(
-      update,
-      new MessageHandler(async (nextUpdate, nextContext) => {
-        nextContext.set('name', nextUpdate.messageText);
-        await nextUpdate.replyMessage('Step 2: What is your email?');
-
-        client.setNextStep(
-          nextUpdate,
-          new MessageHandler(async (finalUpdate, finalContext) => {
-            finalContext.set('email', finalUpdate.messageText);
-
-            const name = finalContext.get('name');
-            const email = finalContext.get('email');
-
-            await finalUpdate.replyMessage(
-              `Registration complete!\nName: ${name}\nEmail: ${email}`
-            );
-
-            finalContext.clear();
-          }),
-          async (cancelUpdate) => {
-            await cancelUpdate.replyMessage('Registration cancelled.');
-          }
-        );
-      }),
-      async (cancelUpdate) => {
-        await cancelUpdate.replyMessage('Registration cancelled.');
-      }
-    );
+    await client.setNextStep(update, 'ask_name', { fallback: 'cancel' });
   },
   { regex: /^register$/i }
 );
+```
+
+Notes:
+
+- Steps can also be registered individually with `client.registerStep('ask_name', handler)`.
+- A custom gate for the fallback: `{ fallback: 'cancel', fallbackRegex: /^(quit|abort)$/i }`.
+- While a step is pending, ordinary handlers are skipped (persistent ones still run first). The step is consumed once it — or its fallback — runs; if it throws, it stays pending.
+- From outside a handler (cron job, admin endpoint): `await client.setNextStep(phone, 'ask_name')`, `await client.clearNextStep(phone)`, `await client.getNextStep(phone)`.
+- A step whose name is no longer registered (e.g. removed in a new deployment) is dropped and the message is routed normally, so users never get stuck.
+
+## Running Several Instances
+
+Nothing extra is needed: context and next steps live in the store, and every instance registers the same handlers and steps at startup. If two instances happen to process the *same user* at the same moment, optimistic locking makes the loser re-run its handler against the fresh record (up to `contextConflictRetries`, default 3), so no update is lost — but a reply sent before the conflicting save is sent again. Prefer "update state first, send last", or `await context.save()` before an irreversible side effect.
+
+```typescript
+// Inspect or repair a user's state from an admin endpoint
+app.post('/admin/reset/:phone', async (req, res) => {
+  await client.clearContext(req.params.phone); // data + pending step
+  res.sendStatus(204);
+});
 ```
 
 ## Complete Express Server Example

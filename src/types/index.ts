@@ -7,6 +7,8 @@ import type { Update } from '../Update.js';
 import type { StatusUpdate } from '../StatusUpdate.js';
 import type { InlineButton, ListItem, ListSection } from '../Markup.js';
 import type { InteractiveSendOptions } from '../Message.js';
+import type { UserContext } from '../context/UserContext.js';
+import type { ContextStore } from '../context/ContextStore.js';
 
 /**
  * WhatsApp webhook value object received from WhatsApp servers
@@ -249,17 +251,24 @@ export interface UpdateData {
 }
 
 /**
- * Handler function types.
+ * Handler function type.
  *
- * @remarks The second `context` argument is **deprecated** and is always
- * `undefined` at runtime — the in-memory user context has been removed. Manage
- * conversation state in your own store keyed by `update.userPhoneNumber`. The
- * parameter is retained only so existing handler signatures keep compiling.
+ * Declare only `update` for a stateless handler. Declare a second `context`
+ * parameter to receive the user's persistent {@link UserContext} — doing so
+ * marks the handler as context-aware, which **requires** a `contextStore` to be
+ * configured on the client (registration throws
+ * {@link ContextStoreRequiredError} otherwise). See {@link HandlerOptions.context}
+ * to override the automatic detection.
+ *
+ * The dispatcher loads the context before the handler runs and saves it after
+ * the handler resolves; if the handler throws, unsaved changes are discarded.
+ * Saves are optimistically locked: if another server changed the user's
+ * context meanwhile, the handler is re-run with fresh state (see
+ * `contextConflictRetries`), so keep side effects reasonably idempotent.
  */
 export type HandlerFunction = (
   update: Update,
-  /** @deprecated Always `undefined`. See {@link UserContext}. */
-  context?: UserContext
+  context: UserContext
 ) => void | Promise<void>;
 export type FilterFunction = (text: string) => boolean;
 
@@ -295,8 +304,15 @@ export interface HandlerOptions {
   regex?: RegExp;
   filter?: FilterFunction;
   /**
-   * @deprecated No effect. The in-memory user context has been removed, so no
-   * context is ever injected into handlers regardless of this flag.
+   * Whether this handler uses the persistent user context.
+   *
+   * - `undefined` (default): auto-detect — the handler is context-aware when
+   *   its function declares two or more parameters (`(update, context) => …`).
+   * - `true`: always load/save the context for this handler.
+   * - `false`: never, even if the function declares a `context` parameter.
+   *
+   * Context-aware handlers require a `contextStore` on the client; registering
+   * one without a store throws {@link ContextStoreRequiredError}.
    */
   context?: boolean;
   persistent?: boolean;
@@ -318,15 +334,35 @@ export interface InteractiveHandlerOptions extends HandlerOptions {
 }
 
 /**
- * Next step handler configuration
+ * Options for {@link UserContext.setNextStep} / `client.setNextStep`.
  */
-export interface NextStepConfig {
-  handler: UpdateHandler;
-  fallbackHandler?: UpdateHandler;
+export interface NextStepOptions {
+  /**
+   * Name of a registered step to run *instead of* `step` when the message
+   * text matches `fallbackRegex` — typically a cancel/abort handler.
+   */
+  fallback?: string;
+  /**
+   * Gate for the fallback. Defaults to `/^(end|stop|cancel)$/i` when a
+   * fallback is given. Persisted with the step (source + flags).
+   */
+  fallbackRegex?: RegExp | string;
 }
 
 /**
- * User context data storage
+ * A user's pending next step, as persisted in their context record. Step and
+ * fallback are **names** of handlers registered with `client.registerStep`
+ * (or the `steps` config option) — that is what makes the state portable
+ * across restarts and instances.
+ */
+export interface NextStepState {
+  step: string;
+  fallback?: string;
+  fallbackRegex?: RegExp;
+}
+
+/**
+ * Shape of a user's stored context document. Values must be JSON-serialisable.
  */
 export interface UserContextData {
   [key: string]: any;
@@ -336,11 +372,7 @@ export interface UserContextData {
  * Reply markup types
  */
 export type ReplyMarkupType =
-  | 'button'
-  | 'list'
-  | 'location_request_message'
-  | 'carousel'
-  | 'flow';
+  'button' | 'list' | 'location_request_message' | 'carousel' | 'flow';
 
 /**
  * WhatsApp Flow — interactive message types
@@ -576,17 +608,11 @@ export type UrlCarouselCard = CarouselCard<CtaUrlAction>;
 /** A carousel card with one or more quick-reply buttons. */
 export type ButtonCarouselCard = CarouselCard<QuickReplyAction>;
 
-
-
 /**
- * User context for managing conversation state.
- *
- * @deprecated The in-memory context store has been removed; handlers no longer
- * receive a context. Retained only for backwards-compatible type references.
+ * Per-user conversation state handed to context-aware handlers. See the
+ * {@link UserContext} class (re-exported here for convenience).
  */
-export interface UserContext {
-  userData: UserContextData;
-}
+export type { UserContext };
 
 /**
  * Update handler base interface
@@ -778,14 +804,21 @@ export interface WhatsAppClient {
     options?: StatusHandlerOptions
   ): void;
 
-  // Conversation flow methods
+  // Conversation context methods
+  /** The configured context store, if any. */
+  readonly contextStore?: ContextStore;
+  getContext(userId: string): Promise<UserContext>;
+  clearContext(userId: string): Promise<void>;
+
+  // Conversation flow methods (next step is persisted in the context store)
+  registerStep(name: string, handler: UpdateHandler): void;
   setNextStep(
-    update: Update,
-    handler: UpdateHandler,
-    fallbackFunction?: () => void | Promise<void>,
-    fallbackRegex?: string | RegExp
-  ): void;
-  clearNextStep(phoneNumber: string): void;
+    target: Update | string,
+    step: string | UpdateHandler,
+    options?: NextStepOptions
+  ): Promise<void>;
+  clearNextStep(target: Update | string): Promise<void>;
+  getNextStep(target: Update | string): Promise<NextStepState | undefined>;
 
   // Utility methods
   getQueueStatus(): { size: number; isProcessing: boolean };

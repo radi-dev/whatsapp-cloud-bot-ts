@@ -2,7 +2,7 @@
 
 ## Overview
 
-This is a complete JavaScript/TypeScript library for building WhatsApp bots using the WhatsApp Business Cloud API. The library is a modern, async-first reimplementation of the original Python library with improvements for JavaScript environments.
+This is a TypeScript-only, ESM-only library for building WhatsApp bots using the WhatsApp Business Cloud API. The library is a modern, async-first reimplementation of the original Python library for Node.js ≥ 18.
 
 ## Project Structure
 
@@ -16,7 +16,12 @@ js-library/
 │   ├── WhatsApp.ts          # Main client class
 │   ├── Dispatcher.ts        # Message routing and handler management
 │   ├── Update.ts            # Incoming message wrapper
-│   ├── UserContext.ts       # Conversation state management
+│   ├── context/             # Persistent conversation context
+│   │   ├── ContextStore.ts      # ContextStore interface, options, errors
+│   │   ├── UserContext.ts       # Session object handed to handlers (+ next step)
+│   │   ├── MemoryContextStore.ts # In-process store (tests/dev only)
+│   │   ├── RedisContextStore.ts  # Redis adapter (Lua-based optimistic locking)
+│   │   └── SqlContextStore.ts    # PostgreSQL / MySQL / SQLite adapters
 │   ├── Handlers.ts          # Message handler classes
 │   ├── Markup.ts            # Interactive message components
 │   ├── Message.ts           # WhatsApp API functions
@@ -24,18 +29,17 @@ js-library/
 ├── tests/                   # Test files
 │   ├── Markup.test.ts       # Markup component tests
 │   ├── helpers.test.ts      # Utility function tests
-│   └── UserContext.test.ts  # Context management tests
+│   ├── UserContext.test.ts  # Session semantics + optimistic locking
+│   ├── ContextStores.test.ts # Store contract across every adapter
+│   ├── ContextDispatch.test.ts # Handler wiring, fail-fast, cross-instance retries
+│   └── NextStep.test.ts     # Persistent next-step flows
 ├── docs/                    # Documentation
 │   └── EXAMPLES.md          # Code examples and tutorials
-├── dist/                    # Build output (generated)
-│   ├── cjs/                 # CommonJS build
-│   ├── esm/                 # ES Modules build
-│   └── types/               # Type declarations
-├── package.json             # NPM package configuration
-├── tsconfig.json            # TypeScript base configuration
-├── tsconfig.*.json          # Build-specific TypeScript configs
-├── jest.config.js           # Jest testing configuration
-├── .eslintrc.js             # ESLint configuration
+├── dist/                    # Build output (generated): ESM .js + .d.ts, mirrors src/
+├── package.json             # NPM package configuration ("type": "module")
+├── tsconfig.json            # TypeScript configuration (single NodeNext build)
+├── jest.config.cjs          # Jest testing configuration
+├── .eslintrc.cjs            # ESLint configuration
 ├── .prettierrc              # Prettier configuration
 ├── .gitignore               # Git ignore rules
 ├── .npmignore               # NPM ignore rules
@@ -51,7 +55,7 @@ js-library/
 1. **Async/Await Native**: Built from ground up for async JavaScript
 2. **Event Queue**: Proper async message queue instead of threading
 3. **TypeScript First**: Complete type safety and IDE autocomplete
-4. **Dual Package**: Works with both ESM and CommonJS
+4. **ESM-only**: Native ES modules, no CommonJS build or dual-package plumbing
 5. **Modern JavaScript**: Uses Map, Set, and other modern features
 6. **Promise-based**: All async operations return Promises
 
@@ -65,20 +69,20 @@ js-library/
 
 #### 2. Dispatcher (`Dispatcher.ts`)
 - Routes incoming messages to appropriate handlers
-- Manages message queue with async processing
-- Handles next-step conversation flows
-- Supports persistent and one-time handlers
+- Serialises processing per phone number; different users run concurrently
+- Loads the user's context record, resolves pending next steps, runs the handler and saves — with optimistic-locking retries
+- Registry of named step handlers; fail-fast when context is referenced without a store
 
 #### 3. Update (`Update.ts`)
 - Wraps incoming webhook messages
 - Provides convenience methods for replying
 - Exposes user and message information
 
-#### 4. UserContext (`UserContext.ts`)
-- Manages per-user conversation state
-- Uses Map for efficient storage
-- Provides key-value interface
-- Supports multiple simultaneous users
+#### 4. Conversation Context (`context/`)
+- `ContextStore` interface: `get` / `set` / `delete` (compare-and-set on a `version`) / optional `touch`
+- Adapters for Redis, PostgreSQL, MySQL, SQLite (bring your own client) and an in-memory store for tests
+- `UserContext`: synchronous key-value session loaded before and saved after each handler; also carries the user's pending next step
+- Survives restarts and works across multiple instances; concurrent modification is detected and the handler re-run
 
 #### 5. Handlers (`Handlers.ts`)
 - MessageHandler - Text messages
@@ -119,15 +123,15 @@ Complete TypeScript definitions for:
 - Unit tests for core functionality
 - Tests for markup components
 - Tests for utility functions
-- Tests for context management
+- Tests for context management, every store adapter, optimistic locking and next-step flows
 - Test coverage reporting
 
 ### Build System
 
-Multiple build targets:
-- **ESM** - ES Modules for modern bundlers
-- **CommonJS** - For Node.js compatibility
-- **Type Declarations** - For TypeScript users
+A single `tsc` build (`module: NodeNext`, target ES2020) emitting into `dist/`:
+- **ESM** `.js` files — the only runtime format
+- **Type declarations** (`.d.ts` + declaration maps) — always shipped
+- No CommonJS output; consumers must `import` the package
 
 ### Documentation
 
@@ -143,16 +147,19 @@ Comprehensive documentation:
 ## NPM Package Details
 
 **Package Name**: `whatsapp-cloud-bot`
-**Version**: 1.0.0
+**Version**: 2.0.0
 **License**: MIT
-**Main Files**:
-- `dist/cjs/index.js` - CommonJS entry
-- `dist/esm/index.js` - ES Module entry
-- `dist/types/index.d.ts` - Type declarations
+**Node**: ≥ 18
+**Entry point** (`exports["."]`):
+- `dist/index.js` - ES module entry (`import` condition)
+- `dist/index.d.ts` - Type declarations (`types` condition)
 
 **Dependencies**:
 - axios - HTTP client
-- form-data - Multipart form data
+- form-data - Multipart form data (media uploads)
+- mime-types - MIME lookup for media uploads
+- dotenv - Optional `.env` loading (`DEBUG`, `LOG_LEVEL`, `IGNORE_AFTER_MINUTES`)
+- No database or Redis drivers — context stores accept your own connected client
 
 **Dev Dependencies**:
 - TypeScript 5.2
@@ -177,8 +184,8 @@ const client = new WhatsApp({
   token: 'YOUR_ACCESS_TOKEN',
 });
 
-client.onMessage(async (update, context) => {
-  await update.replyMessage('Hello!');
+client.onTextMessage(async (update) => {
+  await update.replyWithText('Hello!');
 });
 
 await client.processUpdate(webhookPayload);
@@ -234,8 +241,8 @@ npm publish
    - JavaScript: Method calls with function parameters
 
 4. **Context Management**
-   - Python: Dictionary-based
-   - JavaScript: Map-based with class wrapper
+   - Python: In-process dictionary
+   - JavaScript: External store (Redis / SQL) with optimistic locking; next steps persisted by name
 
 5. **Error Handling**
    - Python: Try/except
@@ -254,7 +261,7 @@ npm publish
 1. **Document Handler**: Added support for document messages
 2. **Better Validation**: More comprehensive input validation
 3. **Queue Status**: Can check queue processing status
-4. **Context Helpers**: Additional context utility methods
+4. **Persistent Context & Next Steps**: External storage with optimistic locking, safe for multi-instance deployments
 5. **Multiple Exports**: Export individual classes for flexibility
 
 ## Next Steps
@@ -315,6 +322,6 @@ All necessary files are in place:
 - ✅ LICENSE file
 - ✅ .gitignore and .npmignore
 - ✅ CHANGELOG
-- ✅ Multiple build targets (ESM + CommonJS)
+- ✅ Single ESM build with type declarations
 
 The library is production-ready and can be published to NPM immediately after running `npm install` and `npm run build`.

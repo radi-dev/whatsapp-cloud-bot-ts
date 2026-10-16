@@ -1,6 +1,6 @@
 # WhatsApp Bot Client
 
-A powerful, fully-typed TypeScript/JavaScript library for building WhatsApp bots using the [WhatsApp Business Cloud API](https://developers.facebook.com/docs/whatsapp/cloud-api).
+A powerful, fully-typed **TypeScript (ESM-only)** library for building WhatsApp bots using the [WhatsApp Business Cloud API](https://developers.facebook.com/docs/whatsapp/cloud-api).
 
 Looking for Python? A Python version exists here: [python-whatsapp-bot](https://github.com/radi-dev/python-whatsapp-bot).
 
@@ -11,12 +11,12 @@ Looking for Python? A Python version exists here: [python-whatsapp-bot](https://
 ## Features
 
 ✨ **Fully Typed** - Complete TypeScript support with comprehensive type definitions
-🚀 **Async/Await** - Modern async JavaScript architecture built from the ground up
-📦 **Dual Package** - Works with both ESM and CommonJS
+🚀 **Async/Await** - Modern async architecture built from the ground up
+📦 **ESM-only, TypeScript-first** - Native ES modules with bundled type declarations; no extra build configuration
 🎯 **Event-Driven** - Elegant handler-based message routing
 💬 **Interactive Messages** - Support for buttons, lists, and location requests
 📸 **Media Support** - Send and receive images, videos, audio, documents, and stickers
-🔄 **Conversation Flow** - Next-step handlers (bring your own store for state)
+🔄 **Conversation Flow** - Persistent per-user context and next-step handlers, backed by Redis / PostgreSQL / MySQL / SQLite — survives restarts and works across multiple instances
 🧪 **Well Tested** - Comprehensive test suite included
 📚 **Great Documentation** - Detailed guides and API reference
 
@@ -26,6 +26,7 @@ Looking for Python? A Python version exists here: [python-whatsapp-bot](https://
 - [Quick Start](#quick-start)
 - [Getting WhatsApp Credentials](#getting-whatsapp-credentials)
 - [Usage Examples](#usage-examples)
+- [Conversation Context](#conversation-context)
 - [API Reference](#api-reference)
 - [TypeScript Usage](#typescript-usage)
 - [Contributing](#contributing)
@@ -42,6 +43,14 @@ yarn add whatsapp-cloud-bot
 # or with pnpm
 pnpm add whatsapp-cloud-bot
 ```
+
+**Requirements:** Node.js ≥ 18 and an ES-module project. The package ships native ESM with type declarations only — use `import`, not `require()`:
+
+```typescript
+import { WhatsApp } from 'whatsapp-cloud-bot';
+```
+
+In a TypeScript project set `"module": "NodeNext"` (or `"ESNext"` + `"moduleResolution": "Bundler"`) so the `exports` map resolves. If your project compiles to CommonJS, load it with a dynamic `await import('whatsapp-cloud-bot')`.
 
 ## Quick Start
 
@@ -80,9 +89,9 @@ const client = new WhatsApp({
 });
 
 // Register a message handler
-client.onMessage(async (update, context) => {
+client.onTextMessage(async (update) => {
   console.log(`Message from ${update.userDisplayName}: ${update.messageText}`);
-  await update.replyMessage('Hello! Thanks for your message.');
+  await update.replyWithText('Hello! Thanks for your message.');
 });
 ```
 
@@ -344,7 +353,7 @@ client.onTextMessage(async (update) => {
 ```typescript
 // Only respond to messages matching regex
 client.onMessage(
-  async (update, context) => {
+  async (update) => {
     await update.replyMessage('You said hello!');
   },
   { regex: /^(hi|hello|hey)/i }
@@ -355,7 +364,7 @@ client.onMessage(
 
 ```typescript
 client.onMessage(
-  async (update, context) => {
+  async (update) => {
     await update.replyMessage('Processing your order...');
   },
   {
@@ -378,7 +387,7 @@ client.onListReply(async (update) => {
 });
 
 // Or handle both at once (combined)
-client.onInteractiveMessage(async (update, context) => {
+client.onInteractiveMessage(async (update) => {
   if (update.messageText === 'option_1') {
     await update.replyWithText('You selected Option 1');
   }
@@ -404,7 +413,7 @@ client.onFlowReply(async (update) => {
 
 ```typescript
 // Handle images
-client.onImageMessage(async (update, context) => {
+client.onImageMessage(async (update) => {
   console.log(`Image caption: ${update.messageText}`);
   console.log(`Image ID: ${update.mediaFileId}`);
 
@@ -414,19 +423,19 @@ client.onImageMessage(async (update, context) => {
 });
 
 // Handle videos
-client.onVideoMessage(async (update, context) => {
+client.onVideoMessage(async (update) => {
   await update.replyMessage('Thanks for the video!');
 });
 
 // Handle audio
-client.onAudioMessage(async (update, context) => {
+client.onAudioMessage(async (update) => {
   if (update.mediaVoice) {
     await update.replyMessage('Got your voice message!');
   }
 });
 
 // Handle documents
-client.onDocumentMessage(async (update, context) => {
+client.onDocumentMessage(async (update) => {
   const buffer = await client.downloadMediaData(update.mediaFileId);
   // Process document...
 });
@@ -435,7 +444,7 @@ client.onDocumentMessage(async (update, context) => {
 #### Location Handler
 
 ```typescript
-client.onLocationMessage(async (update, context) => {
+client.onLocationMessage(async (update) => {
   const { locLatitude, locLongitude, locName } = update;
   await update.replyMessage(
     `Got your location: ${locName || 'Unknown'} (${locLatitude}, ${locLongitude})`
@@ -498,50 +507,175 @@ client.onMessageStatus(handler, { status: 'failed', ignoreAfterMinutes: 10 });
 
 ### Conversation Flow Management
 
-#### Tracking conversation state (bring your own store)
+Multi-turn conversations need two things: somewhere to keep **per-user state** between messages, and a way to say **"route this user's next message to that handler"**. Both are provided by the context manager described in [Conversation Context](#conversation-context) — this section shows the flow side; read that section for setup.
 
-> **Deprecated:** the built-in in-memory `context` parameter has been **removed**. It grew unbounded and didn't work across multiple processes/instances. The `context` argument is still accepted in handler signatures (for source compatibility) but is always `undefined`. Manage state in your own store, keyed by `update.userPhoneNumber`.
+#### Using Next Step Handlers
+
+Step handlers are registered **by name at startup** (on every instance) and the name is persisted with the user's context, so a flow started on one server can continue on another, or after a restart.
 
 ```typescript
-// e.g. a Redis/Postgres/Map you own and can evict/expire
-const store = new Map<string, { name?: string; age?: number }>();
+import { WhatsApp, TextHandler, RedisContextStore } from 'whatsapp-cloud-bot';
 
-client.onMessage(async (update) => {
-  const state = store.get(update.userPhoneNumber) ?? {};
+const client = new WhatsApp({
+  numberId: process.env.WA_PHONE_NUMBER_ID!,
+  token: process.env.WA_TOKEN!,
+  contextStore: new RedisContextStore(redis), // required for context and next steps
+  steps: {
+    ask_name: new TextHandler(async (update, context) => {
+      context.set('name', update.messageText);
+      await update.replyWithText('And your email?');
+      await client.setNextStep(update, 'ask_email', { fallback: 'cancel' });
+    }),
+    ask_email: new TextHandler(async (update, context) => {
+      await update.replyWithText(`Thanks ${context.get('name')}, we'll write to ${update.messageText}.`);
+      context.clear(); // flow finished
+    }),
+    cancel: new TextHandler(async (update, context) => {
+      context.clear();
+      await update.replyWithText('Registration cancelled.');
+    }),
+  },
+});
 
-  if (!state.name) {
-    state.name = update.messageText;
-    await update.replyMessage('Nice to meet you! How old are you?');
-  } else if (!state.age) {
-    state.age = parseInt(update.messageText);
-    await update.replyMessage(`Hello ${state.name}, you are ${state.age}!`);
-    store.delete(update.userPhoneNumber); // reset conversation
-    return;
+// Steps can also be registered one at a time:
+// client.registerStep('ask_name', new TextHandler(...));
+
+client.onTextMessage(
+  async (update) => {
+    await update.replyWithText('What is your name?');
+    // Route this user's next message to the `ask_name` step. If it matches
+    // the fallback regex (default /^(end|stop|cancel)$/i) run `cancel` instead.
+    await client.setNextStep(update, 'ask_name', { fallback: 'cancel' });
+  },
+  { regex: /^register$/i }
+);
+```
+
+How routing works while a step is pending:
+
+- The step (or its fallback, when the text matches `fallbackRegex`) receives the next message and is **consumed** — the user is back to normal routing afterwards, unless the step sets a new one.
+- Regular handlers are skipped; **persistent** handlers (`{ persistent: true }`) still run first and do not consume the step.
+- A step only fires for its own message type (a `TextHandler` step ignores an image — the step stays pending).
+- If the step handler throws, the step stays pending and its context changes are discarded.
+- `setNextStep` / `clearNextStep` / `getNextStep` also accept a phone number, for use outside handlers (cron jobs, admin endpoints).
+
+> **Why names instead of inline handlers?** A closure lives in one process's memory; it cannot be stored in Redis or reached by another server. Passing an unregistered handler instance or a fallback *function* to `setNextStep` throws with guidance. Unknown step names throw `UnknownStepError` immediately.
+
+## Conversation Context
+
+The context manager stores a JSON document per user (keyed by phone number) in an **external store**, so state survives restarts and is shared across workers and servers. You bring an already-connected database/Redis client; the library has no database dependencies.
+
+### Setup
+
+Every backend is instantiated the same way — `new XxxContextStore(client, options)` — and wired the same way:
+
+```typescript
+import {
+  WhatsApp,
+  RedisContextStore,
+  PostgresContextStore,
+  MySqlContextStore,
+  SqliteContextStore,
+  MemoryContextStore,
+} from 'whatsapp-cloud-bot';
+
+// Redis (>= 4.0) — ioredis or node-redis (v4+, call .connect() first)
+const store = new RedisContextStore(redis, { namespace: 'mybot', ttlSeconds: 86400 });
+
+// PostgreSQL — a `pg` Pool or Client
+const store = new PostgresContextStore(pgPool, { namespace: 'mybot', ttlSeconds: 86400 });
+
+// MySQL / MariaDB — a `mysql2/promise` Pool or Connection
+const store = new MySqlContextStore(mysqlPool, { namespace: 'mybot', ttlSeconds: 86400 });
+
+// SQLite — better-sqlite3, node:sqlite (DatabaseSync), or the `sqlite` package
+const store = new SqliteContextStore(db, { namespace: 'mybot', ttlSeconds: 86400 });
+
+// In-process — tests and local development ONLY (lost on restart, not shared)
+const store = new MemoryContextStore({ ttlSeconds: 86400 });
+
+const client = new WhatsApp({ numberId, token, contextStore: store });
+```
+
+**Options (all backends):**
+- `namespace` — Redis key prefix (`<namespace>:<phone>`) or SQL table name. Default `wa_user_context`. Letters, digits, underscores; optionally schema-qualified (`public.bot_ctx`).
+- `ttlSeconds` — sliding inactivity expiry; refreshed on every write and on read-only turns. Omit to keep contexts forever. **Recommended in production:** with redelivery dedupe on (the default) every user who has ever been handled keeps a small record holding their last handled message ids, and only a TTL reclaims it.
+- SQL stores additionally accept `autoCreateTable` (default `true`; runs `CREATE TABLE IF NOT EXISTS` on first use). Call `store.setup()` to run the DDL yourself during deployment and `store.purgeExpired()` from a cron job to reclaim expired rows (they are otherwise only removed lazily when that user is next read).
+
+The SQL table (identical across dialects; `MEDIUMTEXT`/`utf8mb4` on MySQL):
+
+```sql
+CREATE TABLE IF NOT EXISTS wa_user_context (
+  user_id    VARCHAR(128) PRIMARY KEY,
+  data       TEXT   NOT NULL,  -- JSON document
+  version    BIGINT NOT NULL,  -- optimistic-lock counter
+  expires_at BIGINT NULL,      -- epoch ms, NULL = never
+  updated_at BIGINT NOT NULL   -- epoch ms
+);
+```
+
+Other drivers (knex, Drizzle, postgres.js, …): extend the exported `SqlContextStore` base class and implement `runQuery(sql, params)`, or implement the small `ContextStore` interface (`get` / `set` / `delete` / optional `touch`) directly.
+
+### Using the context in handlers
+
+Declare a second parameter and the handler becomes **context-aware**: the dispatcher loads the user's document before the handler runs, you read and write it synchronously, and it is saved after the handler resolves.
+
+```typescript
+client.onTextMessage(async (update, context) => {
+  const step = context.get('step', 0);          // typed as number
+
+  switch (step) {
+    case 0:
+      context.set('step', 1);
+      await update.replyWithText('Welcome! What is your name?');
+      break;
+    case 1:
+      context.set('name', update.messageText).set('step', 2);
+      await update.replyWithText('How old are you?');
+      break;
+    case 2:
+      await update.replyWithText(`Hello ${context.get('name')}, you are ${update.messageText}!`);
+      context.clear();                          // record is deleted on save
+      break;
   }
-  store.set(update.userPhoneNumber, state);
 });
 ```
 
-#### Using Next Step Handler
+- Values must be JSON-serialisable. Nested mutations (`context.get('items').push(x)`) are detected.
+- If the handler **throws**, unsaved changes are discarded. Call `await context.save()` to commit earlier.
+- `context` is also available as `update.context` (for helper functions that only receive the update); it throws if no store is configured.
+- Outside handlers: `const ctx = await client.getContext(phone); ctx.set(...); await ctx.save();` and `await client.clearContext(phone)`.
 
-```typescript
-import { MessageHandler } from 'whatsapp-cloud-bot';
+### Fail-fast configuration
 
-client.onMessage(async (update, context) => {
-  if (update.messageText === 'start survey') {
-    await update.replyMessage('What is your name?');
+Context is opt-in and **strict**:
 
-    // Set next handler for this user only
-    client.setNextStep(
-      update,
-      new MessageHandler(async (nextUpdate, nextContext) => {
-        const name = nextUpdate.messageText;
-        await nextUpdate.replyMessage(`Hello ${name}! Survey complete.`);
-      })
-    );
-  }
-});
-```
+- A handler that declares a `context` parameter (or sets `{ context: true }`) **requires** a `contextStore`. Registering one without a store throws `ContextStoreRequiredError` at startup — not on the first message. `{ context: false }` opts a two-argument function out.
+- `getContext`, `clearContext`, `update.context`, `registerStep`, `setNextStep`, `clearNextStep` and `getNextStep` throw `ContextStoreRequiredError` without a store.
+- Handlers without a `context` parameter never touch the store, so nothing changes for bots that don't use it.
+
+Detection uses the function's declared parameter count; if your handler uses a default value or rest parameter for `context`, set `{ context: true }` explicitly.
+
+### Concurrency: optimistic locking
+
+Within one process, messages from the same user are processed one at a time. Across **multiple instances**, two handlers may run for the same user concurrently. Every record carries a `version`; a save only succeeds if the version is unchanged since the load, otherwise `ContextConflictError` is thrown and the dispatcher **re-runs the handler from scratch against the fresh record** — up to `contextConflictRetries` times (default 3) before the error propagates out of `processUpdate`. Routing is re-resolved on each attempt, so a next step already consumed elsewhere is not run twice.
+
+Consequence: a side effect (e.g. a reply) performed *before* a conflicting save is repeated on the retry. Conflicts are rare in practice (they need the same user to be handled on two servers at the same moment), but keep handlers reasonably idempotent. Set `contextConflictRetries: 0` to handle `ContextConflictError` yourself.
+
+The lock is enforced atomically in each backend: Lua scripts on Redis, `UPDATE … WHERE version = ?` / `INSERT … ON CONFLICT DO NOTHING` (`INSERT IGNORE` on MySQL) checked against affected rows on SQL.
+
+### Webhook retries and idempotency
+
+WhatsApp delivers webhooks **at least once**: if your endpoint does not answer `200` quickly enough (handler still running, process crashed after committing, network hiccup) Meta redelivers the same payload — same `wamid` — repeatedly with backoff, for a long time. Two things in the library deal with this; they are designed to compose, not clash, with the optimistic-locking retries above:
+
+1. **Failed handler → redelivery retries it.** A handler that throws (or exhausts `contextConflictRetries`) commits nothing, so when the redelivered webhook arrives the handler runs again against the same state. Return a non-2xx from your webhook route in that case (the examples below do) and Meta's retry becomes your retry.
+2. **Successful handler → redelivery is skipped.** With `dedupeMessages` (default `true` when a `contextStore` is configured) the handled message ids are saved in the user's record **in the same save, under the same lock** as the handler's changes. A redelivery — on any instance, even one racing the original — is therefore either skipped, or loses the lock, re-loads and then skips. The last 20 ids per user are kept; a message no handler matched is not marked.
+
+Notes:
+
+- Handlers default to `ignoreAfterMinutes: 5`, so a redelivery arriving later than that never runs a handler (the route still returns 200, so Meta stops). Raise it if you rely on Meta's longer retry window, or lower it to drop stale traffic sooner.
+- The in-process conflict re-runs happen *within* one webhook request, with no delay, so they only add a few handler executions of latency. Keep handlers fast so the response stays well within Meta's timeout; if your handlers are slow, acknowledge first and process asynchronously (`client.processUpdate(req.body).catch(log); res.sendStatus(200);`) — and then rely on dedupe plus your own error reporting, since Meta will no longer retry for you.
+- Dedupe needs a store; without one nothing is remembered and a redelivery is processed again, exactly as in previous versions.
 
 ## API Reference
 
@@ -557,7 +691,13 @@ const client = new WhatsApp(config: WhatsAppConfig);
 - `numberId` (required): Your WhatsApp Phone Number ID
 - `token` (required): Your WhatsApp Access Token
 - `markAsRead` (optional, default: `true`): Auto-mark messages as read
+- `showTyping` (optional): Show a typing indicator while marking as read
 - `version` (optional, default: `21`): WhatsApp API version
+- `handlers` (optional): Handlers to register up-front, e.g. `{ greeting: new TextHandler(fn) }`
+- `contextStore` (optional): A `ContextStore` (Redis / PostgreSQL / MySQL / SQLite / Memory). **Required** as soon as any handler declares a `context` parameter or you use next steps — see [Conversation Context](#conversation-context)
+- `contextConflictRetries` (optional, default: `3`): How many times a handler is re-run after an optimistic-locking conflict
+- `dedupeMessages` (optional, default: `true`): Skip webhook redeliveries of messages already handled for that user (needs `contextStore`) — see [Webhook retries and idempotency](#webhook-retries-and-idempotency)
+- `steps` (optional): Named step handlers for next-step flows, e.g. `{ ask_name: new TextHandler(fn) }`
 
 #### Methods
 
@@ -585,9 +725,13 @@ const client = new WhatsApp(config: WhatsAppConfig);
 - `onStickerMessage(action, options?)` - Register sticker handler
 - `onLocationMessage(action, options?)` - Register location handler
 
-**Flow Control:**
-- `setNextStep(update, handler, fallback?, fallbackRegex?)` - Set next step handler
-- `clearNextStep(phoneNumber)` - Clear next step handler
+**Conversation Context & Flow Control:**
+- `getContext(phoneNumber)` - Load a user's `UserContext` outside a handler (`await context.save()` to persist)
+- `clearContext(phoneNumber)` - Delete a user's context (data and pending step)
+- `registerStep(name, handler)` - Register a named step handler (also via the `steps` config option)
+- `setNextStep(update | phoneNumber, stepName, { fallback?, fallbackRegex? }?)` - Route the user's next message to a step
+- `clearNextStep(update | phoneNumber)` - Cancel the pending step
+- `getNextStep(update | phoneNumber)` - Inspect the pending step (`{ step, fallback?, fallbackRegex? }`)
 
 **Webhook Processing:**
 - `processUpdate(webhookPayload)` - Process incoming webhook
@@ -604,6 +748,10 @@ interface Update {
   messageId: string;
   messageText?: string;
   message: WhatsAppMessage;
+
+  // Conversation context (only when a contextStore is configured; throws otherwise)
+  context: UserContext;
+  hasContext: boolean;
 
   // Media properties (when applicable)
   mediaMimeType?: string;
@@ -624,9 +772,42 @@ interface Update {
 }
 ```
 
-### UserContext (removed)
+### UserContext
 
-> **Removed.** The in-memory `UserContext` class and the `clearAllContexts` / `getAllContextUsers` helpers no longer exist. The `context` second parameter of handlers is always `undefined`. Only the `UserContext` **type** is still exported, so the deprecated `context?: UserContext` parameter keeps compiling. Track conversation state in your own store keyed by `update.userPhoneNumber` (see _Tracking conversation state_ above).
+The object handed to context-aware handlers (second parameter) and available as `update.context`. Full details in [Conversation Context](#conversation-context).
+
+```typescript
+class UserContext {
+  readonly userId: string;
+  readonly version: number;     // optimistic-lock version (0 = no record yet)
+  readonly exists: boolean;
+  readonly isDirty: boolean;
+  readonly isEmpty: boolean;
+  readonly size: number;
+
+  get<T>(key: string): T | undefined;
+  get<T>(key: string, defaultValue: T): T;
+  set(key: string, value: unknown): this;   // undefined removes the key
+  assign(values: Record<string, unknown>): this;
+  has(key: string): boolean;
+  delete(key: string): boolean;
+  clear(): void;                            // data only; step and handled ids stay
+  keys(): string[];
+  all(): Record<string, unknown>;
+
+  nextStep: NextStepState | undefined;      // { step, fallback?, fallbackRegex? }
+  setNextStep(step: string, options?: { fallback?: string; fallbackRegex?: RegExp | string }): this;
+  clearNextStep(): boolean;
+
+  recentMessages: readonly string[];        // handled wamids (redelivery dedupe)
+  hasSeenMessage(messageId: string): boolean;
+  markMessageSeen(messageId: string): this;
+
+  save(): Promise<void>;                    // throws ContextConflictError on concurrent modification
+  reload(): Promise<void>;
+  destroy(): Promise<void>;                 // unconditional delete of data + step
+}
+```
 
 ## TypeScript Usage
 
@@ -640,14 +821,22 @@ import {
   HandlerFunction,
 } from 'whatsapp-cloud-bot';
 
-// Type-safe handler (the second `context` arg is deprecated and always undefined)
+// Stateless handler
 const myHandler: HandlerFunction = async (update: Update) => {
   // Full autocomplete and type checking
   const text: string | undefined = update.messageText;
   await update.replyWithText('Hello!');
 };
 
-client.onMessage(myHandler);
+// Context-aware handler — `context` is a UserContext (requires a contextStore)
+const statefulHandler: HandlerFunction = async (update, context) => {
+  const visits: number = context.get('visits', 0) + 1;
+  context.set('visits', visits);
+  await update.replyWithText(`Visit #${visits}`);
+};
+
+client.onTextMessage(myHandler);
+client.onTextMessage(statefulHandler);
 ```
 
 ## Setting Up a Webhook Server
@@ -766,18 +955,18 @@ The encrypted response must be returned as the **raw** HTTP 200 body (a base64 s
    });
    ```
 
-3. **Track Conversation State in Your Own Store** (the built-in in-memory context is deprecated/removed):
+3. **Use an External Context Store in Production** — `MemoryContextStore` is for tests and local development only; it is lost on restart and not shared between instances. Set a `ttlSeconds` so abandoned conversations (and the per-user redelivery markers) expire:
    ```typescript
-   const started = new Set<string>(); // or Redis/Postgres in production
-   client.onMessage(async (update) => {
-     if (!started.has(update.userPhoneNumber)) {
-       started.add(update.userPhoneNumber);
-       await update.replyMessage('Welcome! What is your name?');
-     }
+   const client = new WhatsApp({
+     numberId: process.env.WA_PHONE_NUMBER_ID!,
+     token: process.env.WA_TOKEN!,
+     contextStore: new RedisContextStore(redis, { ttlSeconds: 24 * 3600 }),
    });
    ```
 
-4. **Format Phone Numbers Consistently**:
+4. **Keep Context-Aware Handlers Reasonably Idempotent** — when two instances handle the same user at the same time, the loser of the optimistic lock is re-run from scratch, so a reply sent *before* the conflicting save is sent again. Prefer doing state changes first and sends last, or `await context.save()` before an irreversible side effect.
+
+5. **Format Phone Numbers Consistently**:
    ```typescript
    // Library handles formatting, but ensure you include country code
    await client.sendMessage('1234567890', 'Hello'); // Good

@@ -48,7 +48,13 @@ describe('biz_opaque_callback_data threading', () => {
   });
 
   it('is attached to a template message', async () => {
-    await client.sendTemplateMessage('1234567890', 'tmpl', [], 'en_US', 'track-tmpl');
+    await client.sendTemplateMessage(
+      '1234567890',
+      'tmpl',
+      [],
+      'en_US',
+      'track-tmpl'
+    );
     expect(lastPayload().biz_opaque_callback_data).toBe('track-tmpl');
   });
 
@@ -58,7 +64,12 @@ describe('biz_opaque_callback_data threading', () => {
   });
 
   it('is attached to a carousel message', async () => {
-    await client.sendButtonCarousel('1234567890', 'pick', cards, 'track-carousel');
+    await client.sendButtonCarousel(
+      '1234567890',
+      'pick',
+      cards,
+      'track-carousel'
+    );
     expect(lastPayload().biz_opaque_callback_data).toBe('track-carousel');
   });
 

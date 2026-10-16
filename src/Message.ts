@@ -19,14 +19,8 @@ import type {
   CarouselCard,
   FlowParameters,
 } from './types/index.js';
-import {
-  InlineButton,
-  InlineKeyboard,
-  InlineList,
-  InlineFlow,
-  ListItem,
-  ListSection,
-} from './Markup.js';
+import type { InlineButton, ListItem, ListSection } from './Markup.js';
+import { InlineKeyboard, InlineList, InlineFlow } from './Markup.js';
 import { isLink, getExtensionFromMimeType } from './utils/helpers.js';
 import { DEBUG } from './config.js';
 
@@ -60,7 +54,7 @@ export async function markAsRead(
   messageId: string,
   alwaysShowTyping: boolean
 ): Promise<AxiosResponse> {
-  let payload: any = {
+  const payload: any = {
     messaging_product: 'whatsapp',
     status: 'read',
     message_id: messageId,
@@ -87,7 +81,7 @@ export async function sendTypingIndicator(
   messageId: string,
   markAsRead: boolean
 ): Promise<AxiosResponse> {
-  let payload: any = {
+  const payload: any = {
     messaging_product: 'whatsapp',
     message_id: messageId,
   };

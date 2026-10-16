@@ -9,16 +9,7 @@ module.exports = {
     'plugin:@typescript-eslint/recommended',
     'plugin:prettier/recommended',
   ],
-  plugins: ['import'],
   rules: {
-    'import/extensions': [
-      'error',
-      'always',
-      {
-        js: 'always',
-        ts: 'always',
-      },
-    ],
     '@typescript-eslint/explicit-function-return-type': [
       'warn',
       {
@@ -31,17 +22,17 @@ module.exports = {
     '@typescript-eslint/consistent-type-imports': 'error',
     '@typescript-eslint/explicit-module-boundary-types': 'off',
   },
-  settings: {
-    'import/resolver': {
-      node: {
-        extensions: ['.js', '.ts'],
-        moduleDirectory: ['node_modules', 'src/'],
-        tryExtensions: ['.ts', '.js', '.json'],
-      },
-    },
-  },
   env: {
     node: true,
     es2020: true,
   },
+  overrides: [
+    {
+      files: ['tests/**/*.ts'],
+      rules: {
+        '@typescript-eslint/no-non-null-assertion': 'off',
+        '@typescript-eslint/explicit-function-return-type': 'off',
+      },
+    },
+  ],
 };

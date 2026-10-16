@@ -15,7 +15,26 @@ import type {
   MessageType,
 } from './types/index.js';
 import type { Update } from './Update.js';
-import type { UserContext } from './types/index.js';
+import type { UserContext } from './context/UserContext.js';
+
+/**
+ * Decide whether a handler uses the persistent user context.
+ *
+ * Explicit `options.context` wins; otherwise a handler is context-aware when
+ * its function declares a second parameter (`(update, context) => …`).
+ * Note that `Function.length` stops counting at the first parameter with a
+ * default value or a rest parameter — set `{ context: true }` explicitly in
+ * those cases.
+ */
+export function handlerUsesContext(
+  action: HandlerFunction,
+  options: HandlerOptions = {}
+): boolean {
+  if (typeof options.context === 'boolean') {
+    return options.context;
+  }
+  return typeof action === 'function' && action.length >= 2;
+}
 
 /**
  * Base Update Handler Class
@@ -25,6 +44,11 @@ export abstract class UpdateHandler {
   public regex?: RegExp;
   public filter?: FilterFunction;
   public action: HandlerFunction;
+  /**
+   * Whether this handler receives the persistent user context. Resolved by
+   * {@link handlerUsesContext}; when `true` the client must have a
+   * `contextStore`, which the dispatcher enforces at registration time.
+   */
   public context: boolean;
   public persistent: boolean;
   public ignoreAfterMinutes?: number;
@@ -38,7 +62,7 @@ export abstract class UpdateHandler {
   ) {
     this.name = name;
     this.action = action;
-    this.context = options.context !== false;
+    this.context = handlerUsesContext(action, options);
     this.persistent = options.persistent || false;
     this.ignoreAfterMinutes =
       options.ignoreAfterMinutes || DEFAULT_IGNORE_AFTER_MINUTES;
@@ -74,13 +98,14 @@ export abstract class UpdateHandler {
   }
 
   /**
-   * Run the handler action
+   * Run the handler action. `context` is passed through only for
+   * context-aware handlers (see {@link UpdateHandler.context}).
    */
   async run(update: Update, context?: UserContext): Promise<void> {
     if (this.context && context) {
       await this.action(update, context);
     } else {
-      await this.action(update);
+      await (this.action as (update: Update) => void | Promise<void>)(update);
     }
   }
 }
@@ -111,10 +136,7 @@ export class MessageHandler extends TextHandler {}
  * Handles button and list replies
  */
 export class ButtonHandler extends UpdateHandler {
-  constructor(
-    action: HandlerFunction,
-    options:HandlerOptions = {}
-  ) {
+  constructor(action: HandlerFunction, options: HandlerOptions = {}) {
     super('button', action, options);
   }
 
@@ -132,10 +154,6 @@ export class ButtonHandler extends UpdateHandler {
     return data;
   }
 }
-
-
-
-
 
 /**
  * Parse a Flow completion reply (`interactive.nfm_reply`) into UpdateData.

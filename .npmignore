@@ -13,8 +13,8 @@ src/
 
 # Config files
 tsconfig*.json
-jest.config.js
-.eslintrc.js
+jest.config.cjs
+.eslintrc.cjs
 .prettierrc
 .gitignore
 .npmignore

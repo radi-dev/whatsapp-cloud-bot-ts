@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 
-dotenv.config();
+// `quiet` keeps the library from logging to the consumer's console on import.
+dotenv.config({ quiet: true });
 
 export const DEBUG =
   process.env.DEBUG === 'true' ||

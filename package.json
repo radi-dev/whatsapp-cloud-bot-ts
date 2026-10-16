@@ -1,7 +1,7 @@
 {
     "name": "whatsapp-cloud-bot",
-    "version": "1.7.2",
-    "description": "A TypeScript/JavaScript client library for building WhatsApp bots using the WhatsApp Business Cloud API",
+    "version": "2.0.0",
+    "description": "A TypeScript (ESM-only) client library for building WhatsApp bots using the WhatsApp Business Cloud API",
     "keywords": [
         "whatsapp",
         "whatsapp-bot",
@@ -12,6 +12,7 @@
         "chatbot",
         "messaging",
         "typescript",
+        "esm",
         "async"
     ],
     "homepage": "https://github.com/radi-dev/whatsapp-cloud-bot-ts#readme",
@@ -27,8 +28,8 @@
     "type": "module",
     "exports": {
         ".": {
-            "import": "./dist/index.js",
-            "types": "./dist/index.d.ts"
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
         }
     },
     "main": "dist/index.js",
@@ -48,7 +49,7 @@
         "test": "NODE_OPTIONS=--experimental-vm-modules jest",
         "test:watch": "NODE_OPTIONS=--experimental-vm-modules jest --watch",
         "test:coverage": "NODE_OPTIONS=--experimental-vm-modules jest --coverage",
-        "lint": "eslint 'src/**/*.ts'",
+        "lint": "eslint 'src/**/*.ts' 'tests/**/*.ts'",
         "lint:fix": "eslint 'src/**/*.ts' --fix",
         "format": "prettier --write 'src/**/*.ts'",
         "prepublishOnly": "npm run build && npm test"
@@ -56,7 +57,8 @@
     "dependencies": {
         "axios": "^1.6.0",
         "dotenv": "^17.4.2",
-        "form-data": "^4.0.0"
+        "form-data": "^4.0.0",
+        "mime-types": "^2.1.35"
     },
     "devDependencies": {
         "@types/jest": "^29.5.0",
@@ -73,7 +75,6 @@
         "typescript": "^5.2.0"
     },
     "engines": {
-        "node": ">=14.0.0"
-    },
-    "module": "dist/esm/index.js"
+        "node": ">=18.0.0"
+    }
 }

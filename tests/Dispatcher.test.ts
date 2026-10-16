@@ -1,4 +1,3 @@
-import { jest } from '@jest/globals';
 import { WhatsApp } from '../src/WhatsApp.js';
 import type { WebhookPayload } from '../src/types/index.js';
 
@@ -110,8 +109,9 @@ describe('Dispatcher per-phone serialization', () => {
       await delay(5);
     });
 
-    const chains = (client as unknown as { dispatcher: { chains: Map<string, unknown> } })
-      .dispatcher.chains;
+    const chains = (
+      client as unknown as { dispatcher: { chains: Map<string, unknown> } }
+    ).dispatcher.chains;
 
     await Promise.all([
       client.processUpdate(textPayload('111', 'a')),
